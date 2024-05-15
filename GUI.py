@@ -1,12 +1,15 @@
 import PySimpleGUI as sg
+import numpy as np
 import time
+from io import BytesIO
+from PIL import Image
 
 
 class GUI:
-    def __init__(self):
+    def __init__(self, field):
         # system
         self.fps = 30
-        self.buff_size = 20000
+        self.prev_id = -1
 
         # colors
         self.base_color = '#000000'
@@ -15,12 +18,11 @@ class GUI:
         sg.theme('DarkGrey10')
 
         # screen elements
-        self.graph_width = 1012
+        self.graph_width = 675
         self.graph_height = 675
-        self.scale = 0.9
         self.graph = sg.Graph(key='GRAPH', background_color=self.base_color,
-                              canvas_size=(int(self.graph_width*self.scale), int(self.graph_height*self.scale)),
-                              graph_bottom_left=(0, 0), graph_top_right=(self.graph_width, self.graph_height),
+                              canvas_size=(self.graph_width, self.graph_height),
+                              graph_bottom_left=(0, 0), graph_top_right=(field.width, field.height),
                               pad=(10, 10), enable_events=True, drag_submits=True, visible=True)
 
         layout = [[sg.Text('Test')],
@@ -38,47 +40,142 @@ class GUI:
             if event == sg.WIN_CLOSED:
                 break
 
-            self.draw_field(field)
+            self._draw_accumulated_field(field)
             field.update()
             time.sleep(1.0/self.fps)
 
             # end
         self.window.close()
 
-    def get_cell_color(self, field, x, y):
+    def _get_cell_color(self, field, x, y):
         val = field.position[y][x]
 
         if abs(val) >= 1.0:
-            color = "#ffffff"
+            # color = "#ffffff"
+            R = 255
+            G = 255
+            B = 255
         else:
             brightness = int(255*abs(val))
-            if brightness >= 16:
-                color = "#" + str(hex(brightness))[2:] + str(hex(brightness))[2:] + str(hex(brightness))[2:]
-            else:
-                color = "#0" + str(hex(brightness))[2:] + "0" + str(hex(brightness))[2:] + "0" + str(hex(brightness))[2:]
 
-        return color
+            R = brightness
+            G = brightness
+            B = brightness
 
-    def draw_cell(self, field, x, y, cell_width, cell_height):
-        color = self.get_cell_color(field, x, y)
-        x_px = x * cell_width
-        y_px = y * cell_height
+        return R, G, B
 
-        if color != "#000000":
-            ids = self.window['GRAPH'].draw_rectangle((x_px, y_px + cell_height), (x_px + cell_width, y_px),
-                                            fill_color=color, line_color=color, line_width=0)
+    def _get_accumulated_cell_color(self, field, x, y):
+        val = field.accumulated_light[y][x]/100
 
-            if ids >= self.buff_size:
-                del_ID = ids - self.buff_size
-                self.window['GRAPH'].delete_figure(del_ID)
+        if abs(val) >= 1.0:
+            # color = "#ffffff"
+            R = 255
+            G = 255
+            B = 255
+        else:
+            brightness = int(255*abs(val))
 
-    def draw_field(self, field):
+            R = brightness
+            G = brightness
+            B = brightness
+
+        return R, G, B
+
+    def _get_n_cell_color(self, field, x, y):
+        val = field.n[y][x]
+
+        if val == 1.0:
+            # color = "#ffffff"
+            R = 0
+            G = 0
+            B = 0
+        else:
+            R = 50
+            G = 60
+            B = 70
+
+        return R, G, B
+
+    def _draw_field(self, field):
         nx = field.width
         ny = field.height
 
-        cell_width = self.graph_width // nx
-        cell_height = self.graph_height // ny
+        data = np.zeros((ny, nx, 3), dtype=np.uint8)
 
         for x in range(nx):
             for y in range(ny):
-                self.draw_cell(field, x, y, cell_width, cell_height)
+
+                R, G, B = self._get_cell_color(field, x, y)
+                R_n, G_n, B_n = self._get_n_cell_color(field, x, y)
+
+                if R + R_n <= 255:
+                    data[y][x][0] = R + R_n
+                else:
+                    data[y][x][0] = 255
+
+                if G + G_n <= 255:
+                    data[y][x][1] = G + G_n
+                else:
+                    data[y][x][1] = 255
+
+                if B + B_n <= 255:
+                    data[y][x][2] = B + B_n
+                else:
+                    data[y][x][2] = 255
+
+        img = Image.fromarray(data, 'RGB')
+        img = img.resize((self.graph_width, self.graph_height))
+
+        with BytesIO() as output:
+            img.save(output, format="PNG")
+            img_bytes = output.getvalue()
+
+        id = self.window['GRAPH'].draw_image(data=img_bytes, location=(0, ny))
+
+        if self.prev_id >= 0:
+            self.window['GRAPH'].delete_figure(self.prev_id)
+            self.prev_id = id
+        else:
+            self.prev_id = id
+
+    def _draw_accumulated_field(self, field):
+        nx = field.width
+        ny = field.height
+
+        data = np.zeros((ny, nx, 3), dtype=np.uint8)
+
+        for x in range(nx):
+            for y in range(ny):
+
+                R, G, B = self._get_accumulated_cell_color(field, x, y)
+                R_n, G_n, B_n = self._get_n_cell_color(field, x, y)
+
+                if R + R_n <= 255:
+                    data[y][x][0] = R + R_n
+                else:
+                    data[y][x][0] = 255
+
+                if G + G_n <= 255:
+                    data[y][x][1] = G + G_n
+                else:
+                    data[y][x][1] = 255
+
+                if B + B_n <= 255:
+                    data[y][x][2] = B + B_n
+                else:
+                    data[y][x][2] = 255
+
+        img = Image.fromarray(data, 'RGB')
+        img = img.resize((self.graph_width, self.graph_height))
+
+        with BytesIO() as output:
+            img.save(output, format="PNG")
+            img_bytes = output.getvalue()
+
+        id = self.window['GRAPH'].draw_image(data=img_bytes, location=(0, ny))
+
+        if self.prev_id >= 0:
+            self.window['GRAPH'].delete_figure(self.prev_id)
+            self.prev_id = id
+        else:
+            self.prev_id = id
